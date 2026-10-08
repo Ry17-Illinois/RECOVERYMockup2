@@ -57,24 +57,14 @@
   </div>
 </div>
 
-{%- comment -%}
-  Load PDF.js once per page. The `increment` counter is 0 on the first call
-  to this include and non-zero afterwards, so the loader is emitted only once
-  even when several PDF viewers appear on the same page.
-{%- endcomment -%}
-{%- capture _loader -%}{% increment pdf_book_loader %}{%- endcapture -%}
-{%- if _loader == "0" -%}
 <script type="module">
+  // Import PDF.js directly. The browser dedupes this module across multiple
+  // viewers on the same page, so each include can import it independently
+  // without a separate loader script or cross-script coordination.
   import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.min.mjs";
   pdfjsLib.GlobalWorkerOptions.workerSrc =
     "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.worker.min.mjs";
-  // Expose for per-viewer init scripts below.
-  window.__pdfjsLib = pdfjsLib;
-  window.dispatchEvent(new Event("pdfjs-ready"));
-</script>
-{%- endif -%}
 
-<script type="module">
   (function () {
     var root = document.getElementById("{{ viewer_id }}");
     if (!root || root.dataset.pdfInit === "1") return;
@@ -221,10 +211,8 @@
     });
 
     function start() {
-      var lib = window.__pdfjsLib;
-      if (!lib) { window.addEventListener("pdfjs-ready", start, { once: true }); return; }
       setStatus("Loading\u2026");
-      lib.getDocument(src).promise.then(function (doc) {
+      pdfjsLib.getDocument(src).promise.then(function (doc) {
         pdfDoc = doc;
         numPages = doc.numPages;
         // Open on the requested page, clamped to the document's range.
