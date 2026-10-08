@@ -49,7 +49,7 @@
       <canvas class="pdf-book__page pdf-book__page--left" aria-label="Left page"></canvas>
       <canvas class="pdf-book__page pdf-book__page--right" aria-label="Right page"></canvas>
     </div>
-    <button type="button" class="pdf-book__nav pdf-book__nav--next" aria-label="Next page">&#8250;</button>
+    <button type="button" class="pdf-book__nav pdf-book__nav--next" aria-label="Next page" disabled>&#8250;</button>
   </div>
   <div class="pdf-book__bar">
     <span class="pdf-book__status" aria-live="polite">Loading&hellip;</span>
@@ -105,6 +105,8 @@
     }
 
     function render() {
+      // Nothing to draw until the document has loaded.
+      if (!pdfDoc) return;
       if (isSinglePage()) {
         renderSingle();
       } else {
@@ -159,6 +161,7 @@
     }
 
     function renderPage(pageNum, canvas) {
+      if (!pdfDoc) return;
       canvas.style.visibility = "visible";
       pdfDoc.getPage(pageNum).then(function (page) {
         // Fit each page to roughly half the stage width, respecting DPR for crispness.
@@ -180,6 +183,7 @@
     }
 
     function next() {
+      if (!pdfDoc) return;
       if (isSinglePage()) {
         if (currentPage < numPages) currentPage += 1;
       } else if (currentPage === 1) {
@@ -191,6 +195,7 @@
     }
 
     function prev() {
+      if (!pdfDoc) return;
       if (isSinglePage()) {
         if (currentPage > 1) currentPage -= 1;
       } else if (currentPage <= 2) {
