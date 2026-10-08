@@ -35,6 +35,16 @@ Usage example in a page:
               <a class="description_btn" href="{{ base_path }}{{ element.url }}">Detailed description</a>
             </div>
           </div>
+        {%- elsif element.media_type == 'pdf' -%}
+          <div class="container">
+            {% include pdf_book.html src=element._path start_page=element.start_page %}
+            <div class="description-wrapper">
+              <p class="media-caption">Title: {{ element._title }}<br>
+              Creator: {{ element.creator }}<br>
+              Date: {{ element._date }}</p>
+              <a class="description_btn" href="{{ base_path }}{{ element.url }}">Detailed description</a>
+            </div>
+          </div>
         {%- else -%}
           <div class="container">
             <iframe

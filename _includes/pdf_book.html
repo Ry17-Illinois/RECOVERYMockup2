@@ -1,0 +1,236 @@
+{%- comment -%}
+  pdf_book.html — an "open book" PDF reader for MinDoc.
+
+  Renders a PDF (client-side, via PDF.js) as a two-page spread with
+  prev/next controls. Works on GitHub Pages with no build step.
+
+  Usage:
+    {% include pdf_book.html src="/assets/pdf/my-source.pdf" %}
+
+  Or, as used by media_next.html / image_description.html, pass a media
+  element's path:
+    {% include pdf_book.html src=element._path %}
+
+  Parameters:
+    src   (required) path or URL to the .pdf file. If it points inside the
+          site (starts with "/"), the site base path is prepended so it
+          resolves on GitHub Pages. Absolute http(s) URLs are used as-is.
+    id    (optional) a unique id for this viewer. Defaults to an
+          auto-incremented value so multiple viewers can coexist on a page.
+    start_page (optional) 1-based page number to open on. Defaults to 1.
+          Values outside the document's range are clamped. In two-page
+          (spread) mode the viewer opens on the spread that contains this
+          page.
+{%- endcomment -%}
+
+{%- assign base_path = site.baseurl | default: site.github.baseurl -%}
+{%- assign src = include.src -%}
+{%- assign start_page = include.start_page | default: 1 -%}
+
+{%- comment -%} Resolve the source URL against the site base when it's a local path. {%- endcomment -%}
+{%- if src contains '://' -%}
+  {%- assign resolved_src = src -%}
+{%- else -%}
+  {%- assign resolved_src = base_path | append: src -%}
+{%- endif -%}
+
+{%- comment -%} Give each viewer a unique id so several can live on one page. {%- endcomment -%}
+{%- if include.id -%}
+  {%- assign viewer_id = include.id -%}
+{%- else -%}
+  {%- capture _n -%}{% increment pdf_book_index %}{%- endcapture -%}
+  {%- assign viewer_id = "pdf-book-" | append: _n -%}
+{%- endif -%}
+
+<div class="pdf-book" id="{{ viewer_id }}" data-pdf-src="{{ resolved_src | strip }}" data-pdf-start="{{ start_page }}">
+  <div class="pdf-book__stage">
+    <button type="button" class="pdf-book__nav pdf-book__nav--prev" aria-label="Previous page" disabled>&#8249;</button>
+    <div class="pdf-book__spread" role="group" aria-label="PDF pages">
+      <canvas class="pdf-book__page pdf-book__page--left" aria-label="Left page"></canvas>
+      <canvas class="pdf-book__page pdf-book__page--right" aria-label="Right page"></canvas>
+    </div>
+    <button type="button" class="pdf-book__nav pdf-book__nav--next" aria-label="Next page">&#8250;</button>
+  </div>
+  <div class="pdf-book__bar">
+    <span class="pdf-book__status" aria-live="polite">Loading&hellip;</span>
+    <a class="pdf-book__download" href="{{ resolved_src | strip }}" target="_blank" rel="noopener">Open PDF</a>
+  </div>
+</div>
+
+{%- comment -%}
+  Load PDF.js once per page. The `increment` counter is 0 on the first call
+  to this include and non-zero afterwards, so the loader is emitted only once
+  even when several PDF viewers appear on the same page.
+{%- endcomment -%}
+{%- capture _loader -%}{% increment pdf_book_loader %}{%- endcapture -%}
+{%- if _loader == "0" -%}
+<script type="module">
+  import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.min.mjs";
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.worker.min.mjs";
+  // Expose for per-viewer init scripts below.
+  window.__pdfjsLib = pdfjsLib;
+  window.dispatchEvent(new Event("pdfjs-ready"));
+</script>
+{%- endif -%}
+
+<script type="module">
+  (function () {
+    var root = document.getElementById("{{ viewer_id }}");
+    if (!root || root.dataset.pdfInit === "1") return;
+    root.dataset.pdfInit = "1";
+
+    var leftCanvas = root.querySelector(".pdf-book__page--left");
+    var rightCanvas = root.querySelector(".pdf-book__page--right");
+    var prevBtn = root.querySelector(".pdf-book__nav--prev");
+    var nextBtn = root.querySelector(".pdf-book__nav--next");
+    var status = root.querySelector(".pdf-book__status");
+    var src = root.dataset.pdfSrc;
+
+    var pdfDoc = null;
+    var numPages = 0;
+    // currentPage is the page shown on the LEFT in two-page mode, or the only
+    // visible page in single-page mode. Page 1 (the cover) sits alone on the
+    // right of the first spread in two-page mode.
+    var currentPage = 1;
+    // Requested opening page from the `start_page` include parameter.
+    var startPage = parseInt(root.dataset.pdfStart, 10);
+    if (isNaN(startPage) || startPage < 1) startPage = 1;
+
+    function setStatus(msg) { if (status) status.textContent = msg; }
+
+    // Single-page mode on narrow screens so we never silently skip a page.
+    function isSinglePage() {
+      return window.matchMedia("(max-width: 600px)").matches;
+    }
+
+    function render() {
+      if (isSinglePage()) {
+        renderSingle();
+      } else {
+        renderSpread();
+      }
+    }
+
+    function renderSingle() {
+      if (currentPage < 1) currentPage = 1;
+      if (currentPage > numPages) currentPage = numPages;
+      prevBtn.disabled = currentPage <= 1;
+      nextBtn.disabled = currentPage >= numPages;
+      clearCanvas(leftCanvas);
+      renderPage(currentPage, rightCanvas);
+      setStatus("Page " + currentPage + " of " + numPages);
+    }
+
+    function renderSpread() {
+      // Normalize to a valid spread boundary: cover alone, then even-numbered
+      // left pages (2|3, 4|5, ...).
+      if (currentPage > 1 && currentPage % 2 !== 0) currentPage -= 1;
+      if (currentPage < 1) currentPage = 1;
+
+      prevBtn.disabled = currentPage <= 1;
+      nextBtn.disabled = (currentPage === 1 ? 1 : currentPage + 1) >= numPages;
+
+      if (currentPage === 1) {
+        // Cover: single page on the right, left blank.
+        clearCanvas(leftCanvas);
+        renderPage(1, rightCanvas);
+        setStatus("Page 1 of " + numPages);
+      } else {
+        var leftNum = currentPage;
+        var rightNum = currentPage + 1;
+        renderPage(leftNum, leftCanvas);
+        if (rightNum <= numPages) {
+          renderPage(rightNum, rightCanvas);
+          setStatus("Pages " + leftNum + "\u2013" + rightNum + " of " + numPages);
+        } else {
+          clearCanvas(rightCanvas);
+          setStatus("Page " + leftNum + " of " + numPages);
+        }
+      }
+    }
+
+    function clearCanvas(canvas) {
+      var ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.removeAttribute("width");
+      canvas.removeAttribute("height");
+      canvas.style.visibility = "hidden";
+    }
+
+    function renderPage(pageNum, canvas) {
+      canvas.style.visibility = "visible";
+      pdfDoc.getPage(pageNum).then(function (page) {
+        // Fit each page to roughly half the stage width, respecting DPR for crispness.
+        var stage = root.querySelector(".pdf-book__spread");
+        var targetWidth = Math.max(240, (stage.clientWidth / 2) - 8);
+        var unscaled = page.getViewport({ scale: 1 });
+        var scale = targetWidth / unscaled.width;
+        var dpr = window.devicePixelRatio || 1;
+        var viewport = page.getViewport({ scale: scale * dpr });
+
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        canvas.style.width = (viewport.width / dpr) + "px";
+        canvas.style.height = (viewport.height / dpr) + "px";
+
+        var ctx = canvas.getContext("2d");
+        page.render({ canvasContext: ctx, viewport: viewport });
+      });
+    }
+
+    function next() {
+      if (isSinglePage()) {
+        if (currentPage < numPages) currentPage += 1;
+      } else if (currentPage === 1) {
+        currentPage = 2;
+      } else {
+        currentPage += 2;
+      }
+      render();
+    }
+
+    function prev() {
+      if (isSinglePage()) {
+        if (currentPage > 1) currentPage -= 1;
+      } else if (currentPage <= 2) {
+        currentPage = 1;
+      } else {
+        currentPage -= 2;
+      }
+      render();
+    }
+
+    nextBtn.addEventListener("click", next);
+    prevBtn.addEventListener("click", prev);
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowRight") { next(); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { prev(); e.preventDefault(); }
+    });
+
+    var reRenderTimer = null;
+    window.addEventListener("resize", function () {
+      clearTimeout(reRenderTimer);
+      reRenderTimer = setTimeout(render, 150);
+    });
+
+    function start() {
+      var lib = window.__pdfjsLib;
+      if (!lib) { window.addEventListener("pdfjs-ready", start, { once: true }); return; }
+      setStatus("Loading\u2026");
+      lib.getDocument(src).promise.then(function (doc) {
+        pdfDoc = doc;
+        numPages = doc.numPages;
+        // Open on the requested page, clamped to the document's range.
+        currentPage = Math.min(Math.max(startPage, 1), numPages);
+        render();
+      }).catch(function (err) {
+        setStatus("Could not load PDF.");
+        console.error("pdf_book: failed to load", src, err);
+      });
+    }
+
+    start();
+  })();
+</script>

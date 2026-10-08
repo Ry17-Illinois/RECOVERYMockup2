@@ -7,6 +7,8 @@ layout: default
       <div class="image">
         {% if page.media_type == 'image' %}
         <img src="{% if page._path contains 'assets' %} {{ base_path }}{{ page._path }} {% else %} {{ page._path }} {% endif %}">
+        {% elsif page.media_type == 'pdf' %}
+        {% include pdf_book.html src=page._path start_page=page.start_page %}
         {% else %}
         <iframe
         src="{% if page._path contains 'assets' %} {{ base_path }}{{ page._path }} {% else %} {{ page._path }} {% endif %}" class="page_image"></iframe>
